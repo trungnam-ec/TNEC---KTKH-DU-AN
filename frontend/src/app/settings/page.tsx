@@ -1,7 +1,12 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRole, useToast } from '../providers';
-import { supabase } from '../../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 /** Build query param based on role to let backend resolve the user */
 function userQuery(role: string) {
