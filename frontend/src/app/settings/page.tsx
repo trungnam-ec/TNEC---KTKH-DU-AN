@@ -1,8 +1,7 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRole, useToast } from '../providers';
-
-const API_BASE = 'http://localhost:8000';
+import { supabase } from '@/lib/supabase';
 
 /** Build query param based on role to let backend resolve the user */
 function userQuery(role: string) {
@@ -41,15 +40,14 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
     if (!fullName.trim() || !email.trim() || emailError) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/users/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ full_name: fullName.trim(), email: email.trim().toLowerCase(), role }),
+      const { error } = await supabase.from('users').insert({
+        full_name: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        role,
+        department: 'KTKH',
+        is_active: true,
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || `HTTP ${res.status}`);
-      }
+      if (error) throw new Error(error.message);
       addToast('success', `Đã tạo nhân viên "${fullName.trim()}" thành công!`);
       onCreated();
     } catch (err: any) {
@@ -118,9 +116,12 @@ function UsersTab() {
 
   const fetchUsers = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/users/all`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setUsers(await res.json());
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .order('created_at', { ascending: true });
+      if (error) throw new Error(error.message);
+      setUsers(data || []);
     } catch (err) {
       addToast('error', `Lỗi tải danh sách: ${err}`);
     } finally {
@@ -132,8 +133,13 @@ function UsersTab() {
 
   const toggleActive = async (userId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/users/${userId}/toggle-active`, { method: 'PATCH' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const current = users.find(u => u.id === userId);
+      if (!current) return;
+      const { error } = await supabase
+        .from('users')
+        .update({ is_active: !current.is_active })
+        .eq('id', userId);
+      if (error) throw new Error(error.message);
       addToast('success', 'Đã cập nhật trạng thái nhân viên!');
       fetchUsers();
     } catch (err: any) {
@@ -142,13 +148,14 @@ function UsersTab() {
   };
 
   const deleteUser = async (user: UserProfile) => {
-    if (!window.confirm(`⚠️ BẠN CÓ CHẮC CHẮN MUỐN XÓA NHÂN VIÊN NÀY?\n\n- Nhân viên: ${user.full_name}\n- Tất cả công việc mà người này đang phụ trách sẽ tự động chuyển về trạng thái "Chưa giao" (Assignee = null).\n\nHành động này không thể hoàn tác!`)) {
+    if (!window.confirm(`⚠️ BẠN CÓ CHẮC CHẮN MUỐN XÓA NHÂN VIÊN NÀY?\n\n- Nhân viên: ${user.full_name}\n- Tất cả công việc của người này sẽ mất liên kết assignee.\n\nHành động này không thể hoàn tác!`)) {
       return;
     }
-
     try {
-      const res = await fetch(`${API_BASE}/api/users/${user.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Unassign tasks first to avoid FK constraint
+      await supabase.from('tasks').update({ assignee_id: null }).eq('assignee_id', user.id);
+      const { error } = await supabase.from('users').delete().eq('id', user.id);
+      if (error) throw new Error(error.message);
       addToast('success', `Đã xóa nhân viên ${user.full_name} thành công!`);
       fetchUsers();
     } catch (err: any) {
@@ -251,10 +258,12 @@ export default function Settings() {
   // Fetch current user's profile
   const fetchProfile = useCallback(async () => {
     try {
-      const roleParam = user.role === 'Staff' ? '?role=Staff' : '';
-      const res = await fetch(`${API_BASE}/api/users/me${roleParam}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: UserProfile = await res.json();
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', user.email)
+        .single();
+      if (error) throw new Error(error.message);
       setProfile(data);
       setEditName(data.full_name);
       setEditDept(data.department || 'KTKH');
@@ -264,7 +273,7 @@ export default function Settings() {
     } finally {
       setLoading(false);
     }
-  }, [user.id, addToast]);
+  }, [user.email, addToast]);
 
   useEffect(() => {
     if (!isStaff) fetchProfile();
@@ -283,17 +292,15 @@ export default function Settings() {
   const handleSaveProfile = async () => {
     setSaving(true);
     try {
-      const roleParam = user.role === 'Staff' ? '?role=Staff' : '';
-      const res = await fetch(`${API_BASE}/api/users/update-profile${roleParam}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { error } = await supabase
+        .from('users')
+        .update({
           full_name: editName.trim() || profile?.full_name,
           department: editDept.trim(),
           bio: editBio.trim() || null,
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        })
+        .eq('email', user.email);
+      if (error) throw new Error(error.message);
       addToast('success', 'Cập nhật thông tin thành công!');
       fetchProfile();
     } catch (err: any) {
