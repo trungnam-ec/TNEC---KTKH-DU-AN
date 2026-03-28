@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import { useToast } from './providers';
+import { useToast, useRole } from './providers';
 
 const API_BASE = 'http://localhost:8000';
 
@@ -145,12 +145,17 @@ function KPISkeleton() {
 
 export default function Dashboard() {
   const { addToast } = useToast();
+  const { user, isStaff } = useRole();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchStats = useCallback(async () => {
+    if (isStaff) {
+      setLoading(false);
+      return;
+    }
     try {
-      const res = await fetch(`${API_BASE}/api/dashboard/stats`);
+      const res = await fetch(`${API_BASE}/api/dashboard/stats?user_id=${user.id}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json: DashboardData = await res.json();
       setData(json);
@@ -159,9 +164,20 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [addToast]);
+  }, [addToast, user.id, isStaff]);
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
+
+  if (isStaff) {
+    return (
+      <div className="flex flex-col items-center justify-center py-32 text-slate-500">
+        <svg className="w-20 h-20 mb-6 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+        <h2 className="text-2xl font-bold text-slate-700 mb-2">Tài khoản giới hạn</h2>
+        <p className="font-medium">Bạn không có quyền truy cập Dashboard tổng.</p>
+        <p className="text-sm mt-1">Vui lòng chọn <b>My Tasks</b> để xem công việc của mình.</p>
+      </div>
+    );
+  }
 
   if (loading || !data) {
     return (

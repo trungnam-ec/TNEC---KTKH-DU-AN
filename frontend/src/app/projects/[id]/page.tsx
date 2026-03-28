@@ -638,7 +638,7 @@ export default function ProjectDetailPage() {
         status: typeof pData.status === 'string' ? pData.status : pData.status?.value || 'Khởi động',
       });
 
-      const tRes = await fetch(`${API_BASE}/api/tasks?project_id=${pData.id}`);
+      const tRes = await fetch(`${API_BASE}/api/tasks?project_id=${pData.id}&user_id=${user.id}`);
       if (tRes.ok) {
         const tData = await tRes.json();
         setTasks(tData.map((t: any, i: number) => mapApiTaskToItem(t, i)));
@@ -650,7 +650,7 @@ export default function ProjectDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [slug]);
+  }, [slug, user.id]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

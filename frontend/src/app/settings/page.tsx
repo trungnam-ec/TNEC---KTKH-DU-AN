@@ -141,6 +141,21 @@ function UsersTab() {
     }
   };
 
+  const deleteUser = async (user: UserProfile) => {
+    if (!window.confirm(`⚠️ BẠN CÓ CHẮC CHẮN MUỐN XÓA NHÂN VIÊN NÀY?\n\n- Nhân viên: ${user.full_name}\n- Tất cả công việc mà người này đang phụ trách sẽ tự động chuyển về trạng thái "Chưa giao" (Assignee = null).\n\nHành động này không thể hoàn tác!`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/users/${user.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      addToast('success', `Đã xóa nhân viên ${user.full_name} thành công!`);
+      fetchUsers();
+    } catch (err: any) {
+      addToast('error', `Lỗi khi xóa: ${err.message}`);
+    }
+  };
+
   const roleBadge = (role: string) => role === 'Manager'
     ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
     : 'bg-slate-500/20 text-slate-300 border-slate-500/30';
@@ -198,8 +213,12 @@ function UsersTab() {
               </div>
               <div className="col-span-2 flex justify-center gap-2">
                 <button onClick={() => toggleActive(u.id)}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${u.is_active ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20' : 'bg-green-500/10 text-green-400 hover:bg-green-500/20 border border-green-500/20'}`}>
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${u.is_active ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/20' : 'bg-green-500/10 text-green-400 hover:bg-green-500/20 border border-green-500/20'}`}>
                   {u.is_active ? 'Vô hiệu hóa' : 'Kích hoạt'}
+                </button>
+                <button onClick={() => deleteUser(u)}
+                  className="px-3 py-1.5 rounded-lg text-[10px] font-bold transition-colors bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20">
+                  Xóa
                 </button>
               </div>
             </div>
@@ -217,7 +236,7 @@ function UsersTab() {
    ═══════════════════════════════════════════ */
 
 export default function Settings() {
-  const { user, isManager } = useRole();
+  const { user, isManager, isStaff } = useRole();
   const { addToast } = useToast();
   const [activeTab, setActiveTab] = useState('profile');
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -247,7 +266,19 @@ export default function Settings() {
     }
   }, [user.id, addToast]);
 
-  useEffect(() => { fetchProfile(); }, [fetchProfile]);
+  useEffect(() => {
+    if (!isStaff) fetchProfile();
+  }, [fetchProfile, isStaff]);
+
+  if (isStaff) {
+    return (
+      <div className="flex flex-col h-full bg-slate-950 rounded-3xl overflow-hidden relative border border-slate-800 shadow-2xl items-center justify-center p-8">
+        <svg className="w-20 h-20 mb-6 opacity-30 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+        <h2 className="text-2xl font-bold text-slate-300 mb-2">Truy cập bị từ chối</h2>
+        <p className="font-medium text-slate-400">Tài khoản Staff không có quyền truy cập trang Cài đặt.</p>
+      </div>
+    );
+  }
 
   const handleSaveProfile = async () => {
     setSaving(true);

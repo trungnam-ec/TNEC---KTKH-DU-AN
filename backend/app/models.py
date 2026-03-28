@@ -27,6 +27,7 @@ def gen_uuid() -> str:
 # ═══════════════════════════════════════════
 
 class RoleEnum(str, PyEnum):
+    Admin = 'Admin'
     Manager = 'Manager'
     Staff = 'Staff'
 

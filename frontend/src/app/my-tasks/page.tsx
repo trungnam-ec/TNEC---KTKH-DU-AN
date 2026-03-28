@@ -472,7 +472,7 @@ export default function MyTasks() {
   const fetchTasks = useCallback(async (p: number) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/tasks/my-tasks?page=${p}&per_page=${perPage}`);
+      const res = await fetch(`${API_BASE}/api/tasks/my-tasks?page=${p}&per_page=${perPage}&user_id=${user.id}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setTasks(data.tasks);

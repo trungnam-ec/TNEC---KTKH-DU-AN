@@ -57,7 +57,7 @@ def get_current_user(db: Session, user_id: str) -> models.User:
 
 
 def check_status_permission(role: models.RoleEnum, new_status: models.TaskStatusEnum) -> bool:
-    if role == models.RoleEnum.Manager:
+    if role in (models.RoleEnum.Admin, models.RoleEnum.Manager):
         return True
     if role == models.RoleEnum.Staff:
         return new_status not in STAFF_FORBIDDEN_STATUSES
@@ -65,7 +65,7 @@ def check_status_permission(role: models.RoleEnum, new_status: models.TaskStatus
 
 
 def check_value_edit_permission(role: models.RoleEnum, user_id: str, task_assignee_id: str) -> bool:
-    if role == models.RoleEnum.Manager:
+    if role in (models.RoleEnum.Admin, models.RoleEnum.Manager):
         return True
     return user_id == task_assignee_id
 
@@ -80,17 +80,21 @@ def list_users(db: Session = Depends(get_db)):
 
 
 @app.get("/api/users/me", response_model=schemas.UserResponse)
-def get_current_user(
+def get_current_user_profile(
     user_id: Optional[str] = Query(None, description="Current user ID (UUID)"),
     role: Optional[str] = Query(None, description="Fallback: resolve by role"),
     db: Session = Depends(get_db),
 ):
-    """Get current user's profile. Resolves by user_id > role > first Manager."""
+    """Get current user's profile. Resolves by user_id > role > first Admin > first Manager."""
     user = None
     if user_id and len(user_id) > 10:
         user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user and role == 'Staff':
         user = db.query(models.User).filter(models.User.role == models.RoleEnum.Staff).first()
+    if not user and role == 'Manager':
+        user = db.query(models.User).filter(models.User.role == models.RoleEnum.Manager).first()
+    if not user:
+        user = db.query(models.User).filter(models.User.role == models.RoleEnum.Admin).first()
     if not user:
         user = db.query(models.User).filter(models.User.role == models.RoleEnum.Manager).first()
     if not user:
@@ -111,6 +115,10 @@ def update_user_profile(
         user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user and role == 'Staff':
         user = db.query(models.User).filter(models.User.role == models.RoleEnum.Staff).first()
+    if not user and role == 'Manager':
+        user = db.query(models.User).filter(models.User.role == models.RoleEnum.Manager).first()
+    if not user:
+        user = db.query(models.User).filter(models.User.role == models.RoleEnum.Admin).first()
     if not user:
         user = db.query(models.User).filter(models.User.role == models.RoleEnum.Manager).first()
     if not user:
@@ -173,6 +181,28 @@ def toggle_user_active(user_id: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     return user
+
+
+@app.delete("/api/users/{user_id}", status_code=204)
+def delete_user(user_id: str, db: Session = Depends(get_db)):
+    """
+    Hard delete a user safely.
+    Before deleting, sets assignee_id to NULL for all their assigned tasks.
+    Their activity logs and attachments will be cascade deleted based on DB schema or handled gracefully.
+    """
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Unassign tasks
+    tasks = db.query(models.Task).filter(models.Task.assignee_id == user_id).all()
+    for task in tasks:
+        task.assignee_id = None
+    
+    # Delete user
+    db.delete(user)
+    db.commit()
+    return None
 
 
 @app.get("/api/users/{user_id}", response_model=schemas.UserResponse)
@@ -270,10 +300,18 @@ def create_project(body: schemas.ProjectCreateRequest, db: Session = Depends(get
 # ═══════════════════════════════════════════
 
 @app.get("/api/dashboard/stats")
-def get_dashboard_stats(db: Session = Depends(get_db)):
+def get_dashboard_stats(
+    user_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
     """Aggregated data for Dashboard — all from DB, zero mock."""
     from datetime import datetime, date as date_type
     from collections import Counter
+
+    if user_id:
+        user = get_current_user(db, user_id)
+        if user and user.role == models.RoleEnum.Staff:
+            raise HTTPException(status_code=403, detail="Staff cannot view full dashboard stats")
 
     projects = db.query(models.Project).all()
     tasks = db.query(models.Task).options(
@@ -396,12 +434,12 @@ def get_project_by_slug(project_slug: str, db: Session = Depends(get_db)):
 
 @app.get("/api/tasks/my-tasks")
 def get_my_tasks(
-    user_id: Optional[str] = Query(None, description="Current user ID (optional, returns all if omitted)"),
+    user_id: Optional[str] = Query(None, description="Current user ID"),
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
-    """Get tasks, optionally filtered by assignee. Sorted by deadline ASC (urgent first)."""
+    """Get tasks. If Staff, highly restricted to only assigned tasks."""
     query = (
         db.query(models.Task)
         .options(
@@ -412,7 +450,9 @@ def get_my_tasks(
     )
 
     if user_id:
-        query = query.filter(models.Task.assignee_id == user_id)
+        user = get_current_user(db, user_id)
+        if user and user.role == models.RoleEnum.Staff:
+            query = query.filter(models.Task.assignee_id == user.id)
 
     query = query.order_by(models.Task.deadline.asc().nullslast())
 
@@ -452,11 +492,18 @@ def get_my_tasks(
 @app.get("/api/tasks", response_model=List[schemas.TaskCardResponse])
 def list_tasks(
     project_id: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     query = db.query(models.Task)
     if project_id:
         query = query.filter(models.Task.project_id == project_id)
+    
+    if user_id:
+        user = get_current_user(db, user_id)
+        if user and user.role == models.RoleEnum.Staff:
+            query = query.filter(models.Task.assignee_id == user.id)
+
     return query.order_by(models.Task.created_at.desc()).all()
 
 
@@ -501,7 +548,7 @@ def update_task_status(
     if user_id:
         user = get_current_user(db, user_id)
     if not user:
-        user = db.query(models.User).filter(models.User.role == models.RoleEnum.Manager).first()
+        user = db.query(models.User).filter(models.User.role.in_([models.RoleEnum.Admin, models.RoleEnum.Manager])).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not authenticated")
 
@@ -550,7 +597,7 @@ def update_task_value(
     if user_id:
         user = get_current_user(db, user_id)
     if not user:
-        user = db.query(models.User).filter(models.User.role == models.RoleEnum.Manager).first()
+        user = db.query(models.User).filter(models.User.role.in_([models.RoleEnum.Admin, models.RoleEnum.Manager])).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not authenticated")
 
@@ -584,7 +631,7 @@ def update_task_progress(
     if user_id:
         user = get_current_user(db, user_id)
     if not user:
-        user = db.query(models.User).filter(models.User.role == models.RoleEnum.Manager).first()
+        user = db.query(models.User).filter(models.User.role.in_([models.RoleEnum.Admin, models.RoleEnum.Manager])).first()
 
     old_progress = task.progress_percent
     task.progress_percent = body.progress_percent
