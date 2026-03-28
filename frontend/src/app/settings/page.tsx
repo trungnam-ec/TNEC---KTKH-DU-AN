@@ -1,12 +1,6 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRole, useToast } from '../providers';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 /** Build query param based on role to let backend resolve the user */
 function userQuery(role: string) {
@@ -45,14 +39,15 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
     if (!fullName.trim() || !email.trim() || emailError) return;
     setSaving(true);
     try {
-      const { error } = await supabase.from('users').insert({
-        full_name: fullName.trim(),
-        email: email.trim().toLowerCase(),
-        role,
-        department: 'KTKH',
-        is_active: true,
+      const res = await fetch('/api/supabase/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full_name: fullName.trim(), email: email.trim().toLowerCase(), role }),
       });
-      if (error) throw new Error(error.message);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
       addToast('success', `Đã tạo nhân viên "${fullName.trim()}" thành công!`);
       onCreated();
     } catch (err: any) {
@@ -121,12 +116,9 @@ function UsersTab() {
 
   const fetchUsers = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .order('created_at', { ascending: true });
-      if (error) throw new Error(error.message);
-      setUsers(data || []);
+      const res = await fetch('/api/supabase/users');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setUsers(await res.json());
     } catch (err) {
       addToast('error', `Lỗi tải danh sách: ${err}`);
     } finally {
@@ -138,13 +130,12 @@ function UsersTab() {
 
   const toggleActive = async (userId: string) => {
     try {
-      const current = users.find(u => u.id === userId);
-      if (!current) return;
-      const { error } = await supabase
-        .from('users')
-        .update({ is_active: !current.is_active })
-        .eq('id', userId);
-      if (error) throw new Error(error.message);
+      const res = await fetch('/api/supabase/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: userId, action: 'toggle-active' }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       addToast('success', 'Đã cập nhật trạng thái nhân viên!');
       fetchUsers();
     } catch (err: any) {
@@ -157,10 +148,8 @@ function UsersTab() {
       return;
     }
     try {
-      // Unassign tasks first to avoid FK constraint
-      await supabase.from('tasks').update({ assignee_id: null }).eq('assignee_id', user.id);
-      const { error } = await supabase.from('users').delete().eq('id', user.id);
-      if (error) throw new Error(error.message);
+      const res = await fetch(`/api/supabase/users?id=${user.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       addToast('success', `Đã xóa nhân viên ${user.full_name} thành công!`);
       fetchUsers();
     } catch (err: any) {
@@ -263,16 +252,15 @@ export default function Settings() {
   // Fetch current user's profile
   const fetchProfile = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', user.email)
-        .single();
-      if (error) throw new Error(error.message);
-      setProfile(data);
-      setEditName(data.full_name);
-      setEditDept(data.department || 'KTKH');
-      setEditBio(data.bio || '');
+      const res = await fetch('/api/supabase/users');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const allUsers = await res.json();
+      const me = allUsers.find((u: any) => u.email === user.email);
+      if (!me) throw new Error('User not found');
+      setProfile(me);
+      setEditName(me.full_name);
+      setEditDept(me.department || 'KTKH');
+      setEditBio(me.bio || '');
     } catch (err) {
       addToast('error', `Không thể tải profile: ${err}`);
     } finally {
@@ -297,15 +285,18 @@ export default function Settings() {
   const handleSaveProfile = async () => {
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('users')
-        .update({
-          full_name: editName.trim() || profile?.full_name,
+      if (!profile) throw new Error('No profile loaded');
+      const res = await fetch('/api/supabase/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: profile.id,
+          full_name: editName.trim() || profile.full_name,
           department: editDept.trim(),
           bio: editBio.trim() || null,
-        })
-        .eq('email', user.email);
-      if (error) throw new Error(error.message);
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       addToast('success', 'Cập nhật thông tin thành công!');
       fetchProfile();
     } catch (err: any) {
