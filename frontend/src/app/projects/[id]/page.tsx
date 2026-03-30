@@ -41,7 +41,7 @@ interface ProjectData {
 }
 
 interface AttachedFile {
-  id: string; name: string; type: 'pdf' | 'excel' | 'word' | 'image' | 'other'; size: string; uploadedAt: string;
+  id: string; name: string; type: 'pdf' | 'excel' | 'word' | 'image' | 'other'; size: string; uploadedAt: string; url?: string;
 }
 
 interface ActivityEntry {
@@ -118,7 +118,12 @@ function mapApiTaskToItem(t: any, idx: number): TaskItem {
     valueVND: formatBudget(Number(t.value_vnd || 0)), progress: t.progress_percent || 0,
     assignee: abbr, assigneeId: t.assignee_id || null, assigneeColor: assigneeGradients[idx % assigneeGradients.length],
     deadline: dl, isOverdue, status: kanbanStatus,
-    isBlocked: kanbanStatus === 'blocked', files: [], activities: [],
+    isBlocked: kanbanStatus === 'blocked', 
+    files: (t.attachments || []).map((a: any) => ({
+      id: a.id, name: a.file_name, type: a.file_type || 'other', size: a.file_size || '0 KB',
+      uploadedAt: new Date(a.uploaded_at || t.created_at).toLocaleDateString('vi-VN'), url: a.file_url
+    })),
+    activities: [],
     project_id: t.project_id,
   };
 }
@@ -291,14 +296,41 @@ function TaskDetailModal({ task, onClose, onSave }: { task: TaskItem; onClose: (
     return 'other';
   };
 
-  const addFiles = (fileList: FileList) => {
-    const newFiles: AttachedFile[] = Array.from(fileList).map((f, i) => ({
-      id: `upload-${Date.now()}-${i}`, name: f.name, type: getFileType(f.name),
-      size: f.size > 1024 * 1024 ? `${(f.size / 1024 / 1024).toFixed(1)} MB` : `${Math.round(f.size / 1024)} KB`,
-      uploadedAt: new Date().toLocaleDateString('vi-VN'),
-    }));
-    setFiles(prev => [...newFiles, ...prev]);
-    newFiles.forEach(f => setActivities(prev => [{ id: `act-${Date.now()}`, type: 'file_upload', user: user.name, content: `Đã tải lên: ${f.name}`, timestamp: now() }, ...prev]));
+  const addFiles = async (fileList: FileList) => {
+    setSaving(true);
+    try {
+      const uploadedFiles: AttachedFile[] = [];
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('task_id', task.id);
+        formData.append('uploader_id', user.id.toString());
+        
+        const res = await fetch('/api/supabase/upload', {
+          method: 'POST',
+          body: formData,
+        });
+        if (!res.ok) throw new Error(await res.text());
+        
+        const dbAttachment = await res.json();
+        uploadedFiles.push({
+          id: dbAttachment.id,
+          name: dbAttachment.file_name,
+          type: (dbAttachment.file_type as any) || 'other',
+          size: dbAttachment.file_size,
+          uploadedAt: new Date(dbAttachment.uploaded_at || Date.now()).toLocaleDateString('vi-VN'),
+          url: dbAttachment.file_url,
+        });
+      }
+      setFiles(prev => [...uploadedFiles, ...prev]);
+      uploadedFiles.forEach(f => setActivities(prev => [{ id: `act-${Date.now()}-${f.id}`, type: 'file_upload', user: user.name, content: `Đã tải lên: ${f.name}`, timestamp: now() }, ...prev]));
+      addToast('success', `Đã tải lên ${fileList.length} tài liệu`);
+    } catch (err: any) {
+      addToast('error', `Lỗi tải file: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const submitComment = () => {
@@ -365,10 +397,22 @@ function TaskDetailModal({ task, onClose, onSave }: { task: TaskItem; onClose: (
     finally { setSaving(false); }
   };
 
-  const deleteFile = (fileId: string) => {
-    const file = files.find(f => f.id === fileId);
-    setFiles(prev => prev.filter(f => f.id !== fileId));
-    if (file) setActivities(prev => [{ id: `act-${Date.now()}`, type: 'file_upload', user: user.name, content: `Đã xóa: ${file.name}`, timestamp: now() }, ...prev]);
+  const deleteFile = async (fileId: string) => {
+    setSaving(true);
+    try {
+      if (!fileId.startsWith('upload-')) {
+        const res = await fetch(`/api/supabase/upload?id=${fileId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+      }
+      const file = files.find(f => f.id === fileId);
+      setFiles(prev => prev.filter(f => f.id !== fileId));
+      if (file) setActivities(prev => [{ id: `act-${Date.now()}`, type: 'file_upload', user: user.name, content: `Đã xóa: ${file.name}`, timestamp: now() }, ...prev]);
+      addToast('success', 'Đã xóa tài liệu');
+    } catch (err: any) {
+      addToast('error', `Lỗi xóa file: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const activityIcons: Record<string, string> = { comment: '💬', status_change: '🔄', progress_update: '📈', file_upload: '📎', rbac_denied: '🚫' };
@@ -453,7 +497,14 @@ function TaskDetailModal({ task, onClose, onSave }: { task: TaskItem; onClose: (
                   {files.map(f => (
                     <div key={f.id} className="flex items-center gap-3 p-2 rounded-lg bg-white/40 hover:bg-white/60 group">
                       <FileIcon type={f.type} />
-                      <div className="flex-1 min-w-0"><p className="text-xs font-semibold text-slate-700 truncate">{f.name}</p><p className="text-[10px] text-slate-400">{f.size} · {f.uploadedAt}</p></div>
+                      <div className="flex-1 min-w-0">
+                        {f.url ? (
+                          <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-slate-700 truncate hover:text-primary-600 hover:underline">{f.name}</a>
+                        ) : (
+                          <p className="text-xs font-semibold text-slate-700 truncate">{f.name}</p>
+                        )}
+                        <p className="text-[10px] text-slate-400">{f.size} · {f.uploadedAt}</p>
+                      </div>
                       <button onClick={() => deleteFile(f.id)} className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-md flex items-center justify-center hover:bg-red-100 text-slate-400 hover:text-red-500">✕</button>
                     </div>
                   ))}

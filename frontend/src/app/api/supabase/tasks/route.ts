@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   try {
     let query = supabase
       .from('tasks')
-      .select('*, assignee:users(id, full_name, email, role), project:projects(id, name, slug)', { count: 'exact' });
+      .select('*, assignee:users(id, full_name, email, role), project:projects(id, name, slug), attachments(*, uploader:users(full_name))', { count: 'exact' });
 
     if (userId) {
       query = query.eq('assignee_id', userId);
@@ -50,7 +50,8 @@ export async function GET(req: NextRequest) {
       value_vnd: t.value_vnd ? Number(t.value_vnd) : 0,
       progress_percent: t.progress_percent || 0,
       deadline: t.deadline,
-      attachment_count: 0,
+      attachment_count: t.attachments ? t.attachments.length : 0,
+      attachments: t.attachments || [],
       created_at: t.created_at,
       updated_at: t.updated_at,
     }));
