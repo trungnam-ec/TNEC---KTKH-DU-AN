@@ -2,8 +2,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useToast, useRole } from './providers';
 
-const API_BASE = 'http://localhost:8000';
-
 /* ═══════════════════════════════════════════
    TYPE DEFINITIONS
    ═══════════════════════════════════════════ */
@@ -155,7 +153,7 @@ export default function Dashboard() {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/api/dashboard/stats?user_id=${user.id}`);
+      const res = await fetch('/api/supabase/dashboard');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json: DashboardData = await res.json();
       setData(json);
@@ -164,7 +162,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [addToast, user.id, isStaff]);
+  }, [addToast, isStaff]);
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
 

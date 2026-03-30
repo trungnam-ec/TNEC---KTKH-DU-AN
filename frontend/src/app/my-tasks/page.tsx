@@ -7,7 +7,7 @@ import { useRole, useToast } from '../providers';
    CONSTANTS
    ═══════════════════════════════════════════ */
 
-const API_BASE = 'http://localhost:8000';
+
 
 interface TaskRow {
   id: string; title: string; description: string | null; project_id: string; project_name: string; project_slug: string;
@@ -114,7 +114,7 @@ function NewTaskModal({ onClose, onSaved, projects }: { onClose: () => void; onS
 
   // Fetch active users for assignee dropdown
   useEffect(() => {
-    fetch(`${API_BASE}/api/users`)
+    fetch('/api/supabase/users')
       .then(r => r.json())
       .then((data: UserOption[]) => setUsers(data))
       .catch(() => {});
@@ -124,7 +124,7 @@ function NewTaskModal({ onClose, onSaved, projects }: { onClose: () => void; onS
     if (!title.trim() || !projectId) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/tasks`, {
+      const res = await fetch('/api/supabase/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -276,35 +276,35 @@ function TaskDetailModal({ task, onClose, onSaved }: { task: TaskRow; onClose: (
     try {
       // Update status if changed
       if (editStatus !== task.status) {
-        const res = await fetch(`${API_BASE}/api/tasks/${task.id}/status`, {
+        const res = await fetch('/api/supabase/tasks', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: editStatus }),
+          body: JSON.stringify({ id: task.id, status: editStatus }),
         });
         if (!res.ok) { const err = await res.json(); throw new Error(err.detail || `HTTP ${res.status}`); }
       }
       // Update progress if changed
       if (editProgress !== task.progress_percent) {
-        await fetch(`${API_BASE}/api/tasks/${task.id}/progress`, {
+        await fetch('/api/supabase/tasks', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ progress_percent: editProgress }),
+          body: JSON.stringify({ id: task.id, progress_percent: editProgress }),
         });
       }
       // Update value if changed
       if (editValue !== task.value_vnd) {
-        await fetch(`${API_BASE}/api/tasks/${task.id}/value`, {
+        await fetch('/api/supabase/tasks', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ value_vnd: parseFloat(editValue.replace(/,/g, '')) || 0 }),
+          body: JSON.stringify({ id: task.id, value_vnd: parseFloat(editValue.replace(/,/g, '')) || 0 }),
         });
       }
       // Update description/priority if changed
       if (editDescription !== (task.description || '') || editPriority !== (task.priority || 'Trung bình')) {
-        await fetch(`${API_BASE}/api/tasks/${task.id}/details`, {
+        await fetch('/api/supabase/tasks', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ description: editDescription || null, priority: editPriority }),
+          body: JSON.stringify({ id: task.id, description: editDescription || null, priority: editPriority }),
         });
       }
       addToast('success', `Đã lưu "${task.title}" vào Database!`);
@@ -472,7 +472,7 @@ export default function MyTasks() {
   const fetchTasks = useCallback(async (p: number) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/tasks/my-tasks?page=${p}&per_page=${perPage}&user_id=${user.id}`);
+      const res = await fetch(`/api/supabase/tasks?page=${p}&per_page=${perPage}&user_id=${user.id}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setTasks(data.tasks);
@@ -489,7 +489,7 @@ export default function MyTasks() {
   // Fetch projects for the New Task modal
   const fetchProjects = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/projects`);
+      const res = await fetch('/api/supabase/projects');
       if (!res.ok) return;
       const data = await res.json();
       setProjects(data.map((p: any) => ({ id: p.id, slug: p.slug, name: p.name })));

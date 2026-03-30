@@ -4,7 +4,7 @@ import Link from 'next/link';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRole, useToast } from '../providers';
 
-const API_BASE = 'http://localhost:8000';
+
 
 const statusOptions = ['Khởi động', 'Đang thi công', 'Nghiệm thu', 'Hoàn thành'];
 const statusColor: Record<string, string> = {
@@ -48,7 +48,7 @@ function CreateProjectModal({ onClose, onCreated }: { onClose: () => void; onCre
     setSaving(true);
     try {
       const budgetNum = parseFloat(budget.replace(/\./g, '').replace(/,/g, '')) || 0;
-      const res = await fetch(`${API_BASE}/api/projects/create`, {
+      const res = await fetch('/api/supabase/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -157,7 +157,7 @@ export default function Projects() {
 
   const fetchProjects = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/projects`);
+      const res = await fetch('/api/supabase/projects');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setProjects(await res.json());
     } catch (err) {

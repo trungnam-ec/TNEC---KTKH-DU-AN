@@ -28,7 +28,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useDroppable } from '@dnd-kit/core';
 import { AlertCircle, CheckCircle2, Clock, FileText, Layout, MoreHorizontal, User } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8000';
+
 
 /* ═══════════════════════════════════════════
    TYPES
@@ -151,14 +151,14 @@ function CreateTaskModal({ onClose, onCreated, projectId, projectName }: { onClo
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/users`).then(r => r.json()).then(setUsers).catch(() => {});
+    fetch('/api/supabase/users').then(r => r.json()).then(setUsers).catch(() => {});
   }, []);
 
   const handleSave = async () => {
     if (!title.trim()) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/tasks`, {
+      const res = await fetch('/api/supabase/tasks', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: title.trim(), description: description.trim() || null,
@@ -267,7 +267,7 @@ function TaskDetailModal({ task, onClose, onSave }: { task: TaskItem; onClose: (
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/users`).then(r => r.json()).then(data => {
+    fetch('/api/supabase/users').then(r => r.json()).then(data => {
       setUsers(data);
       // Try to find the assignee id if it exists in the task (we might need to update task mapping)
       // For now, let's assume we match by full_name if id isn't in TaskItem yet
@@ -322,17 +322,17 @@ function TaskDetailModal({ task, onClose, onSave }: { task: TaskItem; onClose: (
       if (editStatus !== task.status) {
         const dbStatus = kanbanToDb[editStatus];
         if (dbStatus) {
-          await fetch(`${API_BASE}/api/tasks/${task.id}/status`, {
+          await fetch('/api/supabase/tasks', {
             method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: dbStatus }),
+            body: JSON.stringify({ id: task.id, status: dbStatus }),
           });
         }
       }
       // Update value via API
       const numericValue = parseFloat(editValue.replace(/\./g, '').replace(/,/g, '')) || 0;
-      await fetch(`${API_BASE}/api/tasks/${task.id}/value`, {
+      await fetch('/api/supabase/tasks', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value_vnd: numericValue }),
+        body: JSON.stringify({ id: task.id, value_vnd: numericValue }),
       });
 
       // Update assignee via API (Added generic update endpoint or specific assignee one)
@@ -340,9 +340,9 @@ function TaskDetailModal({ task, onClose, onSave }: { task: TaskItem; onClose: (
       // Looking at main.py, I'll check if there's a task update endpoint.
       // Actually, I'll just use a PATCH to a new endpoint I'll add or use the existing ones if they support it.
       // Wait, let's assume I can PATCH task details.
-      await fetch(`${API_BASE}/api/tasks/${task.id}/details`, {
+      await fetch('/api/supabase/tasks', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignee_id: editAssigneeId || null }),
+        body: JSON.stringify({ id: task.id, assignee_id: editAssigneeId || null }),
       });
 
       const updatedAssignee = users.find(u => u.id === editAssigneeId);
@@ -628,7 +628,7 @@ export default function ProjectDetailPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const pRes = await fetch(`${API_BASE}/api/projects/${slug}`);
+      const pRes = await fetch(`/api/supabase/projects?slug=${slug}`);
       if (!pRes.ok) { setNotFound(true); setLoading(false); return; }
       const pData = await pRes.json();
       setProject({
@@ -638,7 +638,7 @@ export default function ProjectDetailPage() {
         status: typeof pData.status === 'string' ? pData.status : pData.status?.value || 'Khởi động',
       });
 
-      const tRes = await fetch(`${API_BASE}/api/tasks?project_id=${pData.id}&user_id=${user.id}`);
+      const tRes = await fetch(`/api/supabase/tasks?project_id=${pData.id}&user_id=${user.id}`);
       if (tRes.ok) {
         const tData = await tRes.json();
         setTasks(tData.map((t: any, i: number) => mapApiTaskToItem(t, i)));
@@ -701,10 +701,10 @@ export default function ProjectDetailPage() {
     const dbStatus = kanbanToDb[targetColId];
     if (dbStatus) {
       try {
-        const res = await fetch(`${API_BASE}/api/tasks/${taskId}/status`, {
+        const res = await fetch('/api/supabase/tasks', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: dbStatus }),
+          body: JSON.stringify({ id: taskId, status: dbStatus }),
         });
         
         if (!res.ok) {
