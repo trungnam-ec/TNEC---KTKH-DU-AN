@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, client, location, status, total_budget_vnd, start_date, deadline } = body;
+    const { name, client, location, status, total_budget_vnd } = body;
     
     // Auto-generate slug from name
     const baseSlug = (name || 'project').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -68,9 +68,7 @@ export async function POST(req: NextRequest) {
         client: client || null,
         location: location || null,
         status: status || 'Khởi động',
-        total_budget_vnd: total_budget_vnd || 0,
-        start_date: start_date || null,
-        deadline: deadline || null
+        total_budget_vnd: total_budget_vnd || 0
       })
       .select()
       .single();

@@ -158,7 +158,10 @@ export default function Projects() {
   const fetchProjects = useCallback(async () => {
     try {
       const res = await fetch('/api/supabase/projects');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error || `Lỗi HTTP ${res.status}: Không thể tạo dự án`);
+      }
       setProjects(await res.json());
     } catch (err) {
       addToast('error', `Lỗi tải dự án: ${err}`);
