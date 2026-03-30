@@ -573,7 +573,7 @@ function KanbanColumn({ column, tasks, onCardClick, isForbidden, shakingTaskId, 
           ${isOver && !isForbidden ? 'ring-2 ring-primary-400/50 bg-primary-100/30 scale-[1.01]' : ''}
           ${isOver && isForbidden ? 'ring-2 ring-red-400/50 bg-red-50/20' : ''}`}
       >
-        <SortableContext items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext id={column.id} items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map(task => (
             <TaskCard 
               key={task.id} 
@@ -675,6 +675,9 @@ export default function ProjectDetailPage() {
     // Check if dropping on a column or another task
     const targetColId = over.data.current?.sortable?.containerId || over.id as string;
     
+    // Validate target column
+    if (!columns.some(c => c.id === targetColId)) return;
+
     // If target is same as current column, do nothing
     if (currentTask.status === targetColId) return;
 
