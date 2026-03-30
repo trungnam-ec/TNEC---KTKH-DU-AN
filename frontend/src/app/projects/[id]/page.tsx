@@ -638,10 +638,11 @@ export default function ProjectDetailPage() {
         status: typeof pData.status === 'string' ? pData.status : pData.status?.value || 'Khởi động',
       });
 
-      const tRes = await fetch(`/api/supabase/tasks?project_id=${pData.id}&user_id=${user.id}`);
+      const uParam = isManager ? '' : `&user_id=${user.id}`;
+      const tRes = await fetch(`/api/supabase/tasks?project_id=${pData.id}${uParam}&per_page=200`);
       if (tRes.ok) {
         const tData = await tRes.json();
-        setTasks(tData.map((t: any, i: number) => mapApiTaskToItem(t, i)));
+        setTasks((tData.tasks || []).map((t: any, i: number) => mapApiTaskToItem(t, i)));
       } else {
         setTasks([]);
       }
