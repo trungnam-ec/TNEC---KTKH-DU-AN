@@ -2,11 +2,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRole, useToast } from '../providers';
 
-/** Build query param based on role to let backend resolve the user */
-function userQuery(role: string) {
-  return role === 'Staff' ? 'role=Staff' : '';
-}
-
 /* ═══════════════════════════════════════════
    TYPE DEFINITIONS
    ═══════════════════════════════════════════ */
@@ -14,6 +9,12 @@ function userQuery(role: string) {
 interface UserProfile {
   id: string; email: string; full_name: string; role: string;
   department: string | null; bio: string | null; is_active: boolean; created_at: string;
+}
+
+interface SystemSettings {
+  openai_api_key: string;
+  ai_model: string;
+  system_prompt: string;
 }
 
 /* ═══════════════════════════════════════════
@@ -239,101 +240,106 @@ function UsersTab() {
 export default function Settings() {
   const { user, isManager, isStaff } = useRole();
   const { addToast } = useToast();
-  const [activeTab, setActiveTab] = useState('profile');
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  // Changed default tab to ai-config
+  const [activeTab, setActiveTab] = useState('aiconfig');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Profile form state
-  const [editName, setEditName] = useState('');
-  const [editDept, setEditDept] = useState('');
-  const [editBio, setEditBio] = useState('');
+  // AI Config State
+  const [apiKey, setApiKey] = useState('');
+  const [aiModel, setAiModel] = useState('gpt-4o');
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
-  // Fetch current user's profile
-  const fetchProfile = useCallback(async () => {
+  const DEFAULT_PROMPT = `You are an expert construction data extraction assistant.
+You will be provided with the raw text extracted from a daily construction report PDF.
+Find the following 3 specific metrics and summarize the situation:
+1. "Khối lượng thi công trong ngày" (volume_today): Extract only the numeric value. Ignore text/units. If not found, return 0.
+2. "Sản lượng tạm tính" (estimated_production): Extract only the numeric value (amount of money/value produced). Ignore text/units (like VND). If not found, return 0.
+3. "Giá trị còn lại" (remaining_value): Extract only the numeric value. Ignore text/units. If not found, return 0.
+4. "Tóm tắt tình hình" (raw_summary): A 1-2 sentence summary of any notes, issues, or weather. Kept in Vietnamese.
+
+Format the output strictly as a JSON object matching this schema without markdown wrappers:
+{
+  "volume_today": number,
+  "estimated_production": number,
+  "remaining_value": number,
+  "raw_summary": "string"
+}`;
+
+  // Fetch AI config
+  const fetchSettings = useCallback(async () => {
     try {
-      const res = await fetch('/api/supabase/users');
+      const res = await fetch('/api/supabase/settings');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const allUsers = await res.json();
-      const me = allUsers.find((u: any) => u.email === user.email);
-      if (!me) throw new Error('User not found');
-      setProfile(me);
-      setEditName(me.full_name);
-      setEditDept(me.department || 'KTKH');
-      setEditBio(me.bio || '');
+      const data = await res.json();
+      setApiKey(data.openai_api_key || '');
+      setAiModel(data.ai_model || 'gpt-4o-mini');
+      setSystemPrompt(data.system_prompt || DEFAULT_PROMPT);
     } catch (err) {
-      addToast('error', `Không thể tải profile: ${err}`);
+      addToast('error', `Lỗi tải AI Config: ${err}`);
     } finally {
       setLoading(false);
     }
-  }, [user.email, addToast]);
+  }, [addToast, DEFAULT_PROMPT]);
 
   useEffect(() => {
-    if (!isStaff) fetchProfile();
-  }, [fetchProfile, isStaff]);
+    if (isManager) fetchSettings();
+  }, [fetchSettings, isManager]);
 
   if (isStaff) {
     return (
       <div className="flex flex-col h-full bg-slate-950 rounded-3xl overflow-hidden relative border border-slate-800 shadow-2xl items-center justify-center p-8">
-        <svg className="w-20 h-20 mb-6 opacity-30 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+        <svg className="w-20 h-20 mb-6 opacity-30 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
         <h2 className="text-2xl font-bold text-slate-300 mb-2">Truy cập bị từ chối</h2>
-        <p className="font-medium text-slate-400">Tài khoản Staff không có quyền truy cập trang Cài đặt.</p>
+        <p className="font-medium text-slate-400 text-center">Tài khoản Staff không có quyền truy cập Trung tâm Cài đặt AI.</p>
       </div>
     );
   }
 
-  const handleSaveProfile = async () => {
+  const handleSaveAIConfig = async () => {
     setSaving(true);
     try {
-      if (!profile) throw new Error('No profile loaded');
-      const res = await fetch('/api/supabase/users', {
-        method: 'PATCH',
+      const res = await fetch('/api/supabase/settings', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: profile.id,
-          full_name: editName.trim() || profile.full_name,
-          department: editDept.trim(),
-          bio: editBio.trim() || null,
+          openai_api_key: apiKey.trim(),
+          ai_model: aiModel,
+          system_prompt: systemPrompt.trim(),
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      addToast('success', 'Cập nhật thông tin thành công!');
-      fetchProfile();
+      addToast('success', 'Đã lưu cấu hình Bộ não AI thành công! 🧠✨');
     } catch (err: any) {
-      addToast('error', `Lỗi: ${err.message}`);
+      addToast('error', `Lỗi lưu AI: ${err.message}`);
     } finally {
       setSaving(false);
     }
   };
 
   const tabs = [
-    { id: 'profile', label: 'PROFILE', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg> },
-    { id: 'notifications', label: 'NOTIFICATIONS', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg> },
-    { id: 'security', label: 'SECURITY', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8V7a4 4 0 00-8 0v4h8z" /></svg> },
-    // Users tab — Manager only
-    ...(isManager ? [{
-      id: 'users', label: 'USERS',
-      icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>,
-    }] : []),
+    { id: 'aiconfig', label: 'AI COMMAND CENTER', icon: <span className="text-xl leading-none">🧠</span> },
+    { id: 'notifications', label: 'NOTIFICATIONS', icon: <svg className="w-4 h-4 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg> },
+    { id: 'security', label: 'SECURITY', icon: <svg className="w-4 h-4 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8V7a4 4 0 00-8 0v4h8z" /></svg> },
+    { id: 'users', label: 'USERS', icon: <svg className="w-4 h-4 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg> },
   ];
-
-  const initials = profile ? profile.full_name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) : '...';
 
   return (
     <div className="flex flex-col h-full bg-slate-950 rounded-3xl overflow-hidden relative border border-slate-800 shadow-2xl">
-      {/* Dark Ambient Lights */}
-      <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl translate-x-1/2 -translate-y-1/2" />
-      <div className="absolute bottom-0 left-0 w-80 h-80 bg-indigo-600/10 rounded-full blur-3xl -translate-x-1/2 translate-y-1/2" />
+      {/* Dark Ambient Lights - Purple & Fuschia for AI vibe */}
+      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-purple-600/10 rounded-full blur-3xl translate-x-1/3 -translate-y-1/3 pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-80 h-80 bg-rose-600/10 rounded-full blur-3xl -translate-x-1/2 translate-y-1/2 pointer-events-none" />
 
       {/* Header + Tabs */}
       <div className="p-8 pb-4 relative z-10 border-b border-slate-800 bg-slate-900/50 backdrop-blur-xl">
-        <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Settings</h2>
-        <p className="text-slate-400 font-medium">Cấu hình hồ sơ cá nhân và quản trị hệ thống.</p>
+        <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">System Settings</h2>
+        <p className="text-slate-400 font-medium">Trung tâm Điều khiển AI và Quản trị Hệ thống.</p>
 
         <div className="flex mt-8 space-x-8">
           {tabs.map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              className={`font-bold pb-3 flex items-center gap-2 transition-colors ${activeTab === tab.id ? 'text-blue-400 border-b-2 border-blue-400' : 'text-slate-500 hover:text-slate-300'}`}>
+              className={`font-bold pb-3 flex items-center gap-2 transition-colors ${activeTab === tab.id ? 'text-purple-400 border-b-2 border-purple-400' : 'text-slate-500 hover:text-slate-300'}`}>
               {tab.icon}
               {tab.label}
             </button>
@@ -343,81 +349,102 @@ export default function Settings() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-8 relative z-10">
-        {activeTab === 'profile' && (
-          <div className="max-w-3xl">
+        
+        {/* AI CONFIG TAB */}
+        {activeTab === 'aiconfig' && (
+          <div className="max-w-4xl">
             {loading ? (
               <div className="flex items-center justify-center py-20">
-                <div className="w-10 h-10 border-4 border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
+                <div className="w-10 h-10 border-4 border-purple-400/30 border-t-purple-400 rounded-full animate-spin" />
               </div>
-            ) : profile ? (
-              <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-2xl p-8 shadow-xl">
-                {/* Avatar Section */}
-                <div className="flex items-center gap-6 mb-10 pb-10 border-b border-slate-800">
-                  <div className="relative">
-                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 border-4 border-slate-700 flex items-center justify-center text-3xl font-bold text-white overflow-hidden shadow-lg shadow-blue-500/20">
-                      {initials}
+            ) : (
+              <div className="bg-slate-900/60 backdrop-blur-xl border border-purple-500/20 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
+                {/* Decorative glow */}
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-600 via-rose-500 to-amber-500 opacity-50" />
+                
+                <div className="flex items-center gap-4 mb-8">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-2xl shadow-lg shadow-purple-500/30">
+                    <span className="leading-none text-white font-black">AI</span>
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white mb-1">Cấu hình Bộ Não (OpenAI)</h3>
+                    <p className="text-slate-400 text-sm">Khoá API sẽ được lưu xuống cơ sở dữ liệu và dùng chung cho toàn bộ nhân sự.</p>
+                  </div>
+                </div>
+
+                <div className="grid gap-y-8">
+                  
+                  {/* API KEY */}
+                  <div className="group relative">
+                    <div className="flex items-baseline justify-between mb-2">
+                       <label className="text-xs font-bold text-purple-400 uppercase tracking-wider">OpenAI API Key (Chìa khóa gốc)</label>
+                       <span className="text-[10px] text-slate-500 bg-slate-800/50 px-2 py-0.5 rounded-md border border-slate-700">sk-proj-...</span>
                     </div>
-                    <div className="absolute bottom-0 right-0 w-6 h-6 bg-green-500 border-2 border-slate-900 rounded-full" />
+                    <div className="relative">
+                      <input 
+                        type={showPassword ? "text" : "password"} 
+                        value={apiKey} 
+                        onChange={e => setApiKey(e.target.value)}
+                        placeholder="Nhập khóa API của bạn..."
+                        className="w-full bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-3.5 pr-12 text-white font-mono text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-colors shadow-inner" 
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors p-1"
+                      >
+                        {showPassword ? '👁️' : '🙈'}
+                      </button>
+                    </div>
                   </div>
+
+                  {/* MODEL SELECTION */}
                   <div>
-                    <h3 className="text-xl font-bold text-white mb-1">{profile.full_name}</h3>
-                    <p className="text-blue-400 font-medium text-sm">{profile.role === 'Manager' ? '👑 Manager' : '👤 Staff'} · Phòng {profile.department || 'KTKH'}</p>
-                    <p className="text-slate-500 text-xs mt-1">ID: {profile.id.slice(0, 8)}...</p>
+                    <label className="block text-xs font-bold text-purple-400 uppercase tracking-wider mb-2">Phiên bản Bộ Não (Mặc định)</label>
+                    <div className="relative">
+                      <input 
+                        type="text"
+                        value="🧠 GPT-4o (Đại Bác 10 Nòng — Thông minh đỉnh cao)"
+                        readOnly
+                        className="w-full bg-slate-900/40 opacity-70 border border-slate-700 rounded-xl px-4 py-3.5 text-slate-300 font-bold focus:outline-none cursor-not-allowed shadow-inner"
+                      />
+                    </div>
                   </div>
+
+                  {/* SYSTEM PROMPT */}
+                  <div>
+                    <div className="flex items-baseline justify-between mb-2">
+                      <label className="text-xs font-bold text-purple-400 uppercase tracking-wider">Thần Chú Định Hướng (System Prompt)</label>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mb-3 border-l-2 border-slate-700 pl-3">
+                      Đây là nơi Sếp "ra lệnh" cho định dạng đầu ra của AI. Lưu ý bắt buộc phải yêu cầu trả về theo định dạng JSON với 4 trường: `volume_today`, `estimated_production`, `remaining_value` và `raw_summary`.
+                    </p>
+                    <textarea 
+                      rows={12} 
+                      value={systemPrompt} 
+                      onChange={e => setSystemPrompt(e.target.value)}
+                      style={{ tabSize: 2 }}
+                      className="w-full bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-4 text-emerald-400 font-mono text-sm leading-relaxed focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-colors shadow-inner resize-y whitespace-pre-wrap"
+                      placeholder='Ví dụ: You are an expert data extractor...'
+                    />
+                  </div>
+
                 </div>
 
-                {/* Form Fields */}
-                <div className="grid grid-cols-2 gap-x-8 gap-y-6">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Họ và Tên</label>
-                    <input type="text" value={editName} onChange={e => setEditName(e.target.value)}
-                      className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                      Email Address
-                      <span className="ml-2 text-amber-500 text-[10px] normal-case">🔒 SSO — Chỉ đọc</span>
-                    </label>
-                    <input type="email" value={profile.email} readOnly
-                      className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-slate-500 focus:outline-none cursor-not-allowed opacity-60" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Phòng ban</label>
-                    <input type="text" value={editDept} onChange={e => setEditDept(e.target.value)}
-                      className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                      Phân quyền
-                      <span className="ml-2 text-amber-500 text-[10px] normal-case">🔒 Chỉ đọc</span>
-                    </label>
-                    <input type="text" value={profile.role === 'Manager' ? '👑 Manager (Quản lý)' : '👤 Staff (Nhân viên)'} readOnly
-                      className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-slate-500 focus:outline-none cursor-not-allowed opacity-60" />
-                  </div>
-
-                  <div className="col-span-2 mt-4">
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Giới thiệu bản thân (Bio)</label>
-                    <textarea rows={4} value={editBio} onChange={e => setEditBio(e.target.value)}
-                      className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors resize-none placeholder-slate-600"
-                      placeholder="VD: KS. Dự toán 5 năm kinh nghiệm, chuyên công trình năng lượng tái tạo..." />
-                  </div>
-                </div>
-
-                {/* Save / Cancel */}
-                <div className="mt-10 flex justify-end gap-4">
-                  <button onClick={fetchProfile} className="px-6 py-3 bg-transparent hover:bg-slate-800 text-slate-300 rounded-xl font-semibold transition-colors">Đặt lại</button>
-                  <button onClick={handleSaveProfile} disabled={saving}
-                    className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-colors shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center gap-2">
-                    {saving ? '⏳ Đang lưu...' : '💾 Lưu thay đổi'}
+                {/* Save AI Config */}
+                <div className="mt-10 pt-8 border-t border-slate-800 flex justify-end gap-4">
+                  <button onClick={fetchSettings} className="px-6 py-3 bg-transparent hover:bg-slate-800 text-slate-300 rounded-xl font-semibold transition-colors border border-transparent hover:border-slate-700">Phục hồi</button>
+                  <button onClick={handleSaveAIConfig} disabled={saving || !apiKey}
+                    className="px-8 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl font-bold transition-all shadow-[0_0_20px_rgba(168,85,247,0.4)] hover:shadow-[0_0_30px_rgba(168,85,247,0.6)] disabled:opacity-50 disabled:shadow-none flex items-center gap-2">
+                    {saving ? '⏳ Đang truyền dữ liệu...' : '💾 LƯU CẤU HÌNH AI'}
                   </button>
                 </div>
               </div>
-            ) : (
-              <p className="text-slate-400 text-center py-16">Không tìm thấy thông tin người dùng.</p>
             )}
           </div>
         )}
 
+        {/* NOTIFICATIONS TAB */}
         {activeTab === 'notifications' && (
           <div className="max-w-3xl">
             <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-2xl p-8 shadow-xl">
@@ -430,6 +457,7 @@ export default function Settings() {
           </div>
         )}
 
+        {/* SECURITY TAB */}
         {activeTab === 'security' && (
           <div className="max-w-3xl">
             <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-2xl p-8 shadow-xl">
@@ -461,6 +489,7 @@ export default function Settings() {
           </div>
         )}
 
+        {/* USERS TAB */}
         {activeTab === 'users' && isManager && (
           <div className="max-w-5xl">
             <UsersTab />

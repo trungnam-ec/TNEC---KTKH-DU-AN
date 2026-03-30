@@ -6,17 +6,16 @@ import { useParams } from 'next/navigation';
 import { useRole, useToast } from '../../providers';
 import { 
   DndContext, 
-  DragOverlay, 
   PointerSensor, 
   useSensor, 
   useSensors, 
   DragStartEvent, 
   DragOverEvent, 
   DragEndEvent,
-  defaultDropAnimationSideEffects,
-  DropAnimation,
   closestCorners
 } from '@dnd-kit/core';
+import { DragOverlay, defaultDropAnimationSideEffects } from '@dnd-kit/core';
+import AnalyticsDashboard from '../../../components/AnalyticsDashboard';
 import { 
   arrayMove, 
   SortableContext, 
@@ -339,6 +338,38 @@ function TaskDetailModal({ task, onClose, onSave }: { task: TaskItem; onClose: (
     setCommentText('');
   };
 
+  const analyzeFile = async (fileId: string) => {
+    setSaving(true);
+    addToast('info', 'Đang gửi PDF cho AI phân tích...');
+    try {
+      const res = await fetch('/api/ai/extract-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attachmentId: fileId })
+      });
+      if (!res.ok) {
+        const errObj = await res.json();
+        throw new Error(errObj.error || await res.text());
+      }
+      const result = await res.json();
+      const { data, ocr_mode, pages_processed } = result;
+      const modeLabel = ocr_mode ? `📷 OCR (${pages_processed} trang)` : '📄 Text';
+      addToast('success', `✅ Phân tích thành công! [${modeLabel}] Ngày: ${data.report_date}, Khối lượng: ${data.volume_today.toLocaleString()}`);
+      setActivities(prev => [{ 
+        id: `act-${Date.now()}`, 
+        type: 'comment', 
+        user: '🤖 AI Bot', 
+        content: `[${modeLabel}] Đã phân tích Báo cáo ngày ${data.report_date}: Khối lượng (${data.volume_today.toLocaleString()}), Tạm tính (${data.estimated_production.toLocaleString()}). Tóm tắt: ${data.raw_summary}`, 
+        timestamp: now() 
+      }, ...prev]);
+    } catch (err: any) {
+      addToast('error', `Lỗi AI: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+
   const handleStatusChange = (newStatus: string) => {
     if (!canTransitionTo(newStatus)) {
       addToast('error', `Lỗi phân quyền: Bạn không có quyền chuyển sang "${columns.find(c => c.id === newStatus)?.title}".`);
@@ -493,7 +524,7 @@ function TaskDetailModal({ task, onClose, onSave }: { task: TaskItem; onClose: (
                 <input ref={fileInputRef} type="file" multiple className="hidden" onChange={e => { if (e.target.files) addFiles(e.target.files); }} />
               </div>
               {files.length > 0 && (
-                <div className="mt-3 space-y-2 max-h-36 overflow-y-auto">
+                <div className="mt-3 space-y-2 max-h-36 overflow-y-auto pr-1">
                   {files.map(f => (
                     <div key={f.id} className="flex items-center gap-3 p-2 rounded-lg bg-white/40 hover:bg-white/60 group">
                       <FileIcon type={f.type} />
@@ -505,7 +536,10 @@ function TaskDetailModal({ task, onClose, onSave }: { task: TaskItem; onClose: (
                         )}
                         <p className="text-[10px] text-slate-400">{f.size} · {f.uploadedAt}</p>
                       </div>
-                      <button onClick={() => deleteFile(f.id)} className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-md flex items-center justify-center hover:bg-red-100 text-slate-400 hover:text-red-500">✕</button>
+                      {f.type === 'pdf' && isManager && (
+                        <button onClick={(e) => { e.stopPropagation(); analyzeFile(f.id); }} className="opacity-0 group-hover:opacity-100 flex items-center justify-center px-2 py-1 rounded-md bg-purple-100 text-[10px] font-bold text-purple-600 hover:bg-purple-200 hover:shadow-sm transition-all" title="Bóc tách dữ liệu AI">🤖 Đọc AI</button>
+                      )}
+                      <button onClick={(e) => { e.stopPropagation(); deleteFile(f.id); }} className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-md flex items-center justify-center hover:bg-red-100 text-slate-400 hover:text-red-500 transition-all">✕</button>
                     </div>
                   ))}
                 </div>
@@ -660,6 +694,7 @@ export default function ProjectDetailPage() {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [aiMetrics, setAiMetrics] = useState<any[]>([]);
   
   // DND state
   const [activeTask, setActiveTask] = useState<TaskItem | null>(null);
@@ -696,6 +731,12 @@ export default function ProjectDetailPage() {
         setTasks((tData.tasks || []).map((t: any, i: number) => mapApiTaskToItem(t, i)));
       } else {
         setTasks([]);
+      }
+
+      const mRes = await fetch(`/api/supabase/daily-metrics?project_id=${pData.id}`);
+      if (mRes.ok) {
+        const mData = await mRes.json();
+        setAiMetrics(mData.data || []);
       }
     } catch {
       setNotFound(true);
@@ -833,6 +874,10 @@ export default function ProjectDetailPage() {
                 <p className="text-xs text-slate-400 mt-0.5 font-medium">{w.sub}</p>
               </div>
             ))}
+          </div>
+
+          <div className="flex-shrink-0 w-full">
+            <AnalyticsDashboard projectId={project.id.toString()} />
           </div>
 
           {moveHistory.length > 0 && (
