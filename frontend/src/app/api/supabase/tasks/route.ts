@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
       status: t.status,
       category: t.category,
       priority: t.priority,
-      value_vnd: t.value_vnd ? Number(t.value_vnd).toLocaleString('vi-VN') : '0',
+      value_vnd: t.value_vnd ? Number(t.value_vnd) : 0,
       progress_percent: t.progress_percent || 0,
       deadline: t.deadline,
       attachment_count: 0,
